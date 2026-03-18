@@ -185,3 +185,4 @@ System behaves as:
 - External API / frontend integration
 
 ---
+Use this as the source of truth for the current Prescription Hub state. Do not assume anything else unless I provide code.
