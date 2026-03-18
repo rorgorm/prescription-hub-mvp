@@ -1,22 +1,22 @@
-# 🧠 Project: Veterinary Prescription Hub
+# 🧠 Project: Veterinary Prescription Hub (Updated State)
 
 ## 🔹 Overview
-Cloud-based prescription system designed to:
-- Issue veterinary prescriptions
+Cloud-based veterinary prescription system designed to:
+- Issue prescriptions
 - Allow pharmacies to verify and claim prescriptions
 - Prevent duplication and fraud
-- Maintain a full audit trail of all actions
-- Support future expansion to partial dispensing
+- Maintain a full audit trail
+- Support partial dispensing (next phase)
 
 Core flow:
-Issue → Check → Claim → Audit → Flag → Void/Supersede
+Issue → Check → Claim → Audit → Flag → Void/Supersede → (Next: Partial Dispense)
 
 ---
 
 ## 🗄️ Core Tables
 
 - prescriptions
-- prescription_claims
+- prescription_claims (currently underused)
 - claims_audit
 - pharmacies
 - pharmacy_api_keys
@@ -33,156 +33,244 @@ Issue → Check → Claim → Audit → Flag → Void/Supersede
 - rx_code (text, UNIQUE)
 - status (ISSUED / CLAIMED / DISPENSED / EXPIRED)
 - claimed_by (text)
-- claimed_by_pharmacy_id (uuid FK → pharmacies.id)
+- claimed_by_pharmacy_id (uuid FK → pharmacies.id) ✅ now correctly populated
 - claimed_at (timestamp)
 - issued_by (text)
 - patient_name (text)
 - drug_summary (text)
-- issued_at (timestamp, NOT NULL)
-- validity_mode (PRESET / CUSTOM)
-- validity_days (int)
+- issued_at (timestamp, NOT NULL) ✅ now set correctly
+- validity_mode (PRESET / CUSTOM) ✅ now used
+- validity_days (int) ✅ now used
 - expires_at (derived via trigger)
 - supersedes_id (self FK)
 - voided_at / void_reason
 - attachment fields
 
+---
+
 ### claims_audit
 - append-only audit log
-- records ALL events (checks, claims, failures, auth issues)
-- includes structured result codes:
+- records ALL events:
   - CHECK_OK
   - CLAIM_SUCCESS
   - CLAIM_EXPIRED
   - CLAIM_ALREADY_CLAIMED
   - CLAIM_RACE_LOST
-  - etc.
-- includes `billable` flag
+  - CLAIM_VOIDED ✅ now standardised
+- includes:
+  - prescription_id
+  - pharmacy_id
+  - rx_code
+  - result
+  - errcode
+  - message
+  - billable
+- ⚠️ created_at column recommended (not yet confirmed present)
 
-### prescription_claims
-- intended as claim attempt ledger
-- currently underused vs claims_audit
+---
 
 ### pharmacy_api_keys
 - stores SHA256 hash of API keys
 - links to pharmacy_id
-- includes is_active + last_used_at
+- includes:
+  - is_active
+  - last_used_at
 
 ---
 
-## ⚙️ Core Functions
+## ⚙️ Core Functions (Now Aligned)
 
-- issue_prescription
-- check_prescription_with_key
-- claim_prescription
-- claim_prescription_with_key
-- create_pharmacy_api_key
-- flag_prescription_issue_with_key
-- resolve_prescription_flag
-- verify_prescription
-- void_and_supersede_prescription
+### issue_prescription ✅ FIXED
+- sets:
+  - issued_at = now()
+  - validity_mode
+  - validity_days
+- NO longer accepts expires_at directly
+- expiry derived via trigger
+
+---
+
+### claim_prescription_with_key ✅ FIXED
+- uses standardised API key hashing
+- resolves pharmacy via API key
+- sets:
+  - claimed_by
+  - claimed_by_pharmacy_id ✅ FIXED
+  - claimed_at
+- atomic update prevents race conditions
+- writes CLAIM_SUCCESS audit row
+
+---
+
+### check_prescription_with_key ✅ CLEANED
+- consistent hashing
+- returns claimability state
+- logs CHECK_* audit events
+
+---
+
+### create_pharmacy_api_key ✅ FIXED
+- uses standardised hashing:
+  extensions.digest(convert_to(v_key, 'utf8'), 'sha256')
+- returns raw API key once
+- stores only hash
+
+---
+
+### flag_prescription_issue_with_key ✅ FIXED
+- hashing now consistent
+- API key validation aligned with other functions
+- logs flags correctly
+
+---
+
+### void_and_supersede_prescription ✅ FIXED
+- audit codes corrected:
+  - SUCCESS → CLAIM_SUCCESS
+  - VOIDED → CLAIM_VOIDED
+- old prescription:
+  - voided_at set
+  - void_reason set
+- new prescription:
+  - supersedes_id links to old
+- prior CLAIM_SUCCESS rows set to billable = false
+
+---
+
+## 🔐 Access Model
+
+- Function-based access (SECURITY DEFINER)
+- Minimal RLS (only prescription_flags currently)
+- Pharmacy authentication via API key
 
 ---
 
 ## 🔑 Key Design Decisions
 
 - rx_code is the public identifier
-- rx_code is UNIQUE (DB enforced)
-- expiry is derived from:
-  issued_at + validity_days (trigger-based)
-- prescription clinical data is immutable after issue
-- operational fields (status, claim info) remain mutable
-- claims are atomic (race-condition safe update)
-- API keys are hashed using SHA256
-- audit log is append-only (no mutation)
-- pharmacy identity is UUID-based (not just text)
+- prescription clinical data is immutable
+- operational fields remain mutable
+- expiry derived from issued_at + validity_days
+- API keys stored hashed only
+- claims are atomic and race-condition safe
+- audit log is append-only
+- pharmacy identity is UUID-based (not text)
 - supersession handled via self-referencing FK
 
 ---
 
-## 🔐 Access Model
+## 🔄 Triggers
 
-- Primarily function-based access (SECURITY DEFINER)
-- Minimal use of RLS currently
-- RLS enabled on prescription_flags only
-- Pharmacy access via API key authentication
-
----
-
-## 🚨 Known Issues / TODO
-
-### Critical Fixes
-- issue_prescription() is OUT OF SYNC with schema:
-  - does not set:
-    - validity_mode
-    - validity_days
-    - issued_at
-  - incorrectly accepts expires_at directly
-
-- claim_prescription_with_key():
-  - does NOT set claimed_by_pharmacy_id (should be set)
-
-- API key hashing is INCONSISTENT across functions:
-  - must standardise on:
-    extensions.digest(convert_to(api_key, 'utf8'), 'sha256')
-
-- void_and_supersede_prescription():
-  - uses incorrect audit result values:
-    - 'SUCCESS' → should be 'CLAIM_SUCCESS'
-    - 'VOIDED' → should be 'CLAIM_VOIDED'
-
-### Structural Questions
-- Is prescription_claims needed, or redundant vs claims_audit?
-- Should RLS be introduced for public tables later?
+- prevent_prescription_mutation
+- prevent_created_at_update
+- prevent_prescriber_change
+- prevent_validity_change_after_claim
+- set_expires_at_from_validity
 
 ---
 
-## 🔄 Triggers (Important)
+## 🚨 Known Issues / TODO (Updated)
 
-- prevent_prescription_mutation → blocks clinical changes
-- prevent_created_at_update → enforces immutability
-- prevent_prescriber_change → locks prescriber
-- prevent_validity_change_after_claim → locks validity post-claim
-- set_expires_at_from_validity → derives expiry automatically
+### Minor
+- claims_audit likely missing created_at → should be added
+
+### Structural
+- prescription_claims table likely redundant vs claims_audit (to review)
 
 ---
 
 ## 🧠 Current Architecture Summary
 
-System behaves as:
-
-1. Prescription issued → stored immutably
+1. Prescription issued → immutable record created
 2. Pharmacy authenticates via API key
-3. Pharmacy checks claimability
-4. System validates:
-   - existence
-   - expiry
-   - claim status
-5. Atomic claim update prevents race conditions
-6. Audit log records ALL actions
-7. Flags allow exception handling
-8. Prescriptions can be voided and superseded
+3. Prescription checked for validity
+4. Atomic claim prevents duplication
+5. Audit log records ALL events
+6. Flags allow exception handling
+7. Prescriptions can be voided and superseded cleanly
 
 ---
 
-## 📌 Current Focus
+## 🚀 Next Phase: Partial Dispensing (Agreed Direction)
 
-- Fix schema/function mismatches
-- Align claim logic with relational pharmacy model
-- Standardise API key handling
-- Prepare for next phase:
-  → partial dispensing
-  → billing logic
-  → stronger access control (RLS vs function-only)
+### Key Requirement
+Support:
+- multiple medicines per prescription
+- partial redemption over time
+- multiple pharmacies dispensing different items
 
 ---
 
-## 🚀 Next Phase (Planned)
+## 🧩 Proposed New Tables
 
-- Partial dispensing ledger
-- Multi-claim tracking per prescription
-- Pharmacy billing model
-- Improved audit analytics
-- External API / frontend integration
+### prescription_items (NEW)
+- id
+- prescription_id
+- line_number
+- drug_description
+- quantity_prescribed
+- quantity_dispensed
+- quantity_remaining
+- status (ISSUED / PARTIAL / DISPENSED / EXPIRED)
 
 ---
+
+### prescription_item_dispenses (NEW)
+- id
+- prescription_item_id
+- prescription_id
+- pharmacy_id
+- quantity_dispensed
+- dispensed_at
+- billable
+- created_at
+
+---
+
+## 🧠 Key Design Decision (CRITICAL)
+
+👉 Ledger must operate at item level, not prescription level
+
+This supports:
+- multi-drug prescriptions
+- independent partial dispensing
+- accurate audit trails
+- regulatory defensibility
+
+---
+
+## 🔄 Future Flow (Planned)
+
+Issue → Items created →  
+Pharmacy selects item →  
+Dispense quantity →  
+Ledger updated →  
+Remaining balance tracked  
+
+---
+
+## 📌 Next Build Steps
+
+1. Create prescription_items table
+2. Create prescription_item_dispenses table
+3. Update issue flow to create items
+4. Update claim logic → item + quantity based
+5. Derive prescription status from item states
+6. Introduce billing per dispense event
+
+---
+
+## 🧠 Strategic Position
+
+System now has:
+- robust auditability
+- fraud prevention
+- relational pharmacy tracking
+- supersession logic
+- strong foundation for controlled-drug workflows
+
+Next phase (partial dispensing) will:
+- significantly increase real-world usability
+- differentiate product from competitors
+- align with both practice and pharmacy workflo
 Use this as the source of truth for the current Prescription Hub state. Do not assume anything else unless I provide code.
