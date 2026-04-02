@@ -2,336 +2,365 @@ Project Context – Prescription Processing System (MVP)
 
 Last Updated
 
-2026-04-01
+2026-04-02
+
+⸻
 
 Overview
 
-This project is now a working hosted MVP for a veterinary prescription workflow with:
-	•	Practice-side prescription issuing
+This project is a working hosted MVP for a veterinary prescription workflow with:
+	•	Practice-side prescription issuing UI
 	•	Hosted backend processing on Railway
 	•	Supabase database + storage
 	•	Pharmacy-side preview and dispense flow
-	•	Safe void-and-reissue correction flow
+	•	Safe void-and-reissue correction workflow
+	•	Emerging “practice workspace” with prescription log and correction tools
 
 The system is now suitable for controlled demonstration, but not yet production-ready from a security or authentication perspective.
+
+⸻
 
 Architecture
 
 Frontend (Practice)
 	•	File: practice.html
 	•	Runs locally in browser
-	•	Current purpose:
-	•	Select prescriber
-	•	Select validity period
-	•	Mark as controlled drug
-	•	Upload prescription PDF
-	•	Issue prescription in a single action
-	•	Display recent uploaded prescriptions log
+	•	Now functions as a workspace, not just an upload form
+	•	Responsibilities:
+	•	Issue prescriptions
+	•	Display recent prescriptions log
+	•	Filter prescriptions (date range + Rx code)
+	•	Edit optional reference text
+	•	Void and reissue prescriptions inline
 
 Frontend (Pharmacy)
-	•	Existing separate pharmacy HTML remains in use
-	•	Handles:
-	•	Entering / using Rx code
-	•	Previewing watermarked PDF
-	•	Dispensing flow
+	•	Separate HTML page (unchanged)
+	•	Responsibilities:
+	•	Enter Rx code
+	•	View preview PDF
+	•	Dispense prescription
 
 Backend
 	•	Node.js / Express server hosted on Railway
 	•	Public domain:
-	•	https://prescription-processor-production.up.railway.app
+https://prescription-processor-production.up.railway.app
 
-Main endpoints
+Endpoints:
 	•	POST /api/issue-and-process
 	•	POST /process-prescription-attachments
 	•	GET /api/practice-prescriptions
 	•	POST /api/void-and-reissue
+	•	POST /api/update-prescription-reference
 	•	GET /health
 
+⸻
+
 Database & Storage (Supabase)
-	•	PostgreSQL database with RPC functions
-	•	Storage bucket:
-	•	prescription-attachments
+
+Database:
+	•	PostgreSQL
+	•	prescriptions table now includes:
+	•	reference_text (NEW)
+
+Storage:
+	•	Bucket: prescription-attachments
+	•	Stores:
+	•	original uploads
+	•	preview PDFs
+	•	dispense PDFs
+
+⸻
 
 Current Working State
 
-The following are now working:
-	•	Practice-side upload from practice.html
-	•	Practice-side issue-and-process via hosted Railway backend
-	•	Railway deployment is live and no longer dependent on local laptop server
-	•	Prescription processing generates:
-	•	canonical original attachment path
-	•	preview PDF
-	•	dispense PDF
-	•	Existing pharmacy-side HTML remains separate and continues to handle preview / dispense flow
-	•	Manual SQL and manual curl are no longer required for the normal practice-side issuing workflow
-	•	Practice prescriptions endpoint returns a large recent prescription list successfully
-	•	Safe void-and-reissue endpoint works successfully when passed:
-	•	a valid old Rx code
-	•	a valid uploaded file path
-	•	prescriber ID
-	•	void reason
-	•	validity days
-	•	controlled drug flag
+Working end-to-end:
+	•	Practice uploads file → Supabase storage
+	•	Backend issues prescription
+	•	Backend processes:
+	•	clean dispense PDF
+	•	watermarked preview PDF
+	•	Backend updates DB with attachment paths
+	•	Practice UI displays:
+	•	recent prescriptions
+	•	relationships (replaces / replaced by)
+	•	metadata
+	•	Void-and-reissue flow:
+	•	creates new Rx code
+	•	links via supersedes_id
+	•	voids original safely
 
-Practice UI – Current State
+Manual SQL and curl are no longer required for normal flows.
 
-Current inputs on practice.html
-	•	Prescriber
+⸻
+
+Practice Workspace (Current Features)
+
+Issue section:
+	•	Prescriber selection
 	•	Validity period
 	•	Controlled drug checkbox
-	•	defaults to No
-	•	Prescription PDF upload
+	•	Optional “Unique identifier” (reference_text)
+	•	PDF upload
+	•	One-click issue
 
-Current behaviour
-	1.	User selects prescriber
-	2.	User selects validity period
-	3.	User optionally ticks controlled drug
-	4.	User uploads PDF
-	5.	User clicks “Upload and issue prescription”
-	6.	Frontend uploads file to Supabase Storage
-	7.	Frontend calls Railway backend /api/issue-and-process
-	8.	Backend issues prescription and processes files
-	9.	UI returns Rx code
-	10.	Practice page can now also show recent uploaded prescriptions
+Prescription log:
+	•	Displays recent prescriptions
+	•	Shows:
+	•	Rx code
+	•	status
+	•	created date
+	•	validity
+	•	controlled drug flag
+	•	void reason (if applicable)
+	•	reference_text (editable)
 
-Practice Log / Workspace Direction
+Filtering:
+	•	Date range (from + to)
+	•	Rx code search
 
-We have now agreed that the practice upload page should evolve into a broader practice workspace, not just a one-off upload form.
+Inline actions:
+	•	Copy Rx code
+	•	View PDF (currently broken – see below)
+	•	Void / Correct workflow (inline panel)
+	•	Edit and save reference_text
 
-Why this is needed
-	•	Practices need to review previous uploads
-	•	Practices need to void and replace incorrect uploads
-	•	Practices will likely value the upload page as a useful log / reference tool
-	•	Date-based searching is important
-	•	Potential future support for optional owner email as a search key and delivery mechanism
+Relationships:
+	•	“Replaces RX-…”
+	•	“Replaced by RX-…”
 
-Agreed direction
-	•	The page should show uploaded prescriptions in a log
-	•	Practices should be able to return later and void / re-upload a corrected attachment
-	•	Date range filtering is preferred over exact date-only filtering
-	•	Owner email is likely useful as an optional field later, but is not yet implemented
+⸻
 
-Owner Email Discussion
+Reference Text Feature (NEW)
 
-We discussed making owner email an optional upload field in future.
+Field: reference_text (TEXT)
 
-Possible advantages
-	•	Useful search identifier for practices
-	•	Potentially useful for owners looking up historic prescriptions
-	•	Could support automatic owner email sending of Rx code / details
+Purpose:
+	•	Human-readable identifier
+	•	Examples:
+	•	“Blackie Smith”
+	•	PMS code
+	•	Animal ID
 
-Important caveat
-	•	Owner email would be personal data
-	•	This would trigger GDPR considerations
-	•	Current thinking:
-	•	optional, not mandatory
-	•	only added once the wider practice workspace is stable
+Behaviour:
+	•	Optional at upload
+	•	Can be edited retrospectively from list
+	•	Stored in DB and returned via API
+	•	Updated via:
+POST /api/update-prescription-reference
 
-Security Model – Current MVP
+⸻
 
-Current state
-	•	Practice UI uses a shared secret via:
-	•	Authorization: Bearer ...
-	•	Backend validates PRACTICE_UI_SECRET
+Prescription Relationships (NEW)
 
-Important limitation
-	•	This secret is currently present in frontend code
-	•	This is acceptable only for controlled MVP/demo use
-	•	This is not the final production security model
+Backend now returns:
+	•	supersedes_rx_code
+	•	replaced_by_rx_code
 
-Future direction
-	•	Replace shared secret with proper authentication
-	•	Add practice accounts and role-based access
+UI displays:
+	•	Replaces RX-XXXX
+	•	Replaced by RX-YYYY
+
+This improves audit clarity and usability significantly.
+
+⸻
+
+Void-and-Reissue Flow (Final Design)
+
+Correct safe sequence:
+	1.	Load original prescription
+	2.	Issue replacement prescription (new Rx code)
+	3.	Process replacement attachment
+	4.	Link replacement → old via supersedes_id
+	5.	Void old prescription
+
+Key rules:
+	•	Replacement ALWAYS gets a new Rx code
+	•	Old Rx code is never reused
+	•	Old prescription remains immutable
+	•	Void only occurs after successful replacement
+
+This is now implemented and working.
+
+⸻
+
+Backend Structure (server.js)
+
+Key components:
+	•	requireSecret(…)
+	•	requirePracticeUiSecret(…)
+	•	processPrescriptionAttachment(…)
+	•	/api/issue-and-process
+	•	/api/practice-prescriptions
+	•	/api/void-and-reissue
+	•	/api/update-prescription-reference
+	•	/health
+
+processPrescriptionAttachment handles:
+	•	download original file
+	•	generate dispense PDF
+	•	generate preview watermark PDF
+	•	upload processed files
+	•	update DB paths
+
+⸻
 
 Environment Variables (Railway)
 
-Required service-level variables
+Required:
 	•	SUPABASE_URL
 	•	SUPABASE_SERVICE_ROLE_KEY
 	•	PROCESSOR_SECRET
 	•	PRACTICE_UI_SECRET
 	•	BUCKET_NAME
 
-Notes
-	•	Missing variables cause startup failure
-	•	Previous Railway crash was caused by missing PRACTICE_UI_SECRET
-	•	Railway edits must actually be deployed, not just saved
+Notes:
+	•	Missing variables → server crash
+	•	Must be set at service level
+	•	Changes require redeploy
+
+⸻
+
+Security Model (Current MVP)
+
+Current:
+	•	Practice UI uses shared secret:
+Authorization: Bearer PRACTICE_UI_SECRET
+
+Limitations:
+	•	Secret is exposed in frontend
+	•	Acceptable for demo only
+
+Future:
+	•	Replace with authentication system
+	•	Practice accounts + roles
+	•	Token-based auth
+
+⸻
 
 CORS
 
-CORS needed to be enabled because practice.html is browser-based and calls Railway directly.
+Enabled to allow:
+	•	Browser → Railway API calls
+	•	Authorization headers
 
-This was required due to:
-	•	Browser preflight OPTIONS requests
-	•	Authorization header in fetch requests
-
-Without proper CORS handling, browser showed:
+Without CORS:
 	•	“Load failed”
-	•	preflight 502 / blocked fetch errors
+	•	preflight errors
 
-Supabase Storage
-
-Bucket
-	•	prescription-attachments
-
-Relevant current policy state
-	•	Public read policy exists
-	•	Practice-side upload path works in MVP flow
-
-Important note
-	•	The upload path generated by practice.html is timestamped and must be used exactly when passing file paths to backend endpoints
+⸻
 
 Watermarking
 
-Watermark system is stable and accepted.
+Status: stable and accepted
 
-Characteristics
-	•	Horizontal
-	•	Dense
-	•	Edge-to-edge feel
-	•	Repeating phrase includes Rx code
-	•	Brick / stagger pattern
-	•	Final tuning accepted by user
+Characteristics:
+	•	horizontal
+	•	dense
+	•	repeating pattern
+	•	includes Rx code
+	•	brick/stagger layout
 
-Current settings
-	•	fontSize = 12
-	•	opacity = 0.16
-	•	rowGap = 22
-	•	stagger offset based on unit text width
+Settings:
+	•	fontSize: 12
+	•	opacity: 0.16
+	•	rowGap: 22
 
-Important Backend Structure (server.js)
+⸻
 
-Key components currently present
-	•	requireSecret(...)
-	•	requirePracticeUiSecret(...)
-	•	processPrescriptionAttachment(...)
-	•	/process-prescription-attachments
-	•	/api/issue-and-process
-	•	/api/practice-prescriptions
-	•	/api/void-and-reissue
-	•	/health
+Known Issue (IMPORTANT)
 
-processPrescriptionAttachment(...) handles
-	•	download original file
-	•	clean dispense PDF creation
-	•	preview watermark generation
-	•	upload of processed files
-	•	DB update of attachment fields
+View PDF button currently fails with:
 
-Practice Prescriptions Endpoint
+{“statusCode”:“404”,“error”:“Bucket not found”,“message”:“Bucket not found”}
 
-GET /api/practice-prescriptions is now working and returns a large list of prescriptions.
+Cause:
+	•	UI builds direct public URL to Supabase storage
+	•	bucket access method incorrect for current setup
 
-Purpose
-	•	populate recent prescription list on practice page
-	•	foundation for practice workspace / log
+Planned fix:
+	•	switch to Supabase signed URLs via:
+storage.createSignedUrl(…)
 
-Important note
-	•	Earlier generic error “Failed to fetch prescriptions” was resolved
-	•	Terminal curl test confirmed this endpoint now works
+Status:
+	•	NOT yet implemented
 
-Void-and-Reissue Flow
-
-The safe corrected design is now:
-	1.	Load original prescription
-	2.	Issue replacement prescription (new Rx code)
-	3.	Process replacement attachment
-	4.	Link replacement to old prescription using supersedes_id
-	5.	Only then void old prescription
-
-This is important.
-
-Agreed model
-	•	The replacement gets a NEW Rx code
-	•	The old Rx code is not reused
-	•	The old prescription remains immutable
-	•	The old prescription is only voided after the replacement is successfully issued and processed
-
-Why this is preferred
-	•	safer audit trail
-	•	clearer pharmacy logic
-	•	avoids ambiguity
-	•	consistent with immutable / append-only design
-
-Important lesson from testing
-	•	Earlier version voided first, which was unsafe if later steps failed
-	•	This was rewritten safely
-	•	The safe version is now working
-
-Successful test result already achieved
-	•	old Rx code successfully voided
-	•	replacement Rx code successfully created
-	•	processed attachment paths generated
-	•	endpoint returned ok: true
-
-Important behavioural note
-	•	The backend will accept any valid uploaded attachment_path as the replacement attachment
-	•	It does not know whether this was a genuinely corrected file or simply an existing uploaded file path reused during testing
-	•	In the final UI, the correction flow should make the user upload/select the replacement file deliberately
+⸻
 
 Key Lessons Learned
-	•	Missing environment variables on Railway cause full server crash
-	•	Railway changes must actually be deployed, not just edited
-	•	Browser errors like “Load failed” can hide CORS / preflight issues
-	•	Real product architecture needs a backend orchestration layer
-	•	It was correct to separate practice and pharmacy UIs
-	•	The processor must be hosted, not run from a laptop, for real demos
-	•	Safe correction flow must not void the old prescription before replacement processing succeeds
-	•	When testing with curl, placeholder file paths or Rx codes will cause confusing but logical failures
+	•	Railway must be deployed, not just edited
+	•	Missing env vars crash entire service
+	•	Browser errors often mask CORS issues
+	•	Hosted backend is essential for real demos
+	•	Separation of practice vs pharmacy UI was correct
+	•	Safe correction flow must not void first
+	•	Storage paths must be used exactly as uploaded
+	•	Relationship mapping (supersedes) greatly improves UX
+
+⸻
 
 Current Limitations
-	•	Practice UI still uses shared secret in browser code
-	•	No real auth yet
-	•	No polished success state yet
-	•	No copy button for Rx code yet in final refined form
-	•	No direct handoff from practice UI to pharmacy UI yet
-	•	No inline “Void / Correct” form in practice UI yet
-	•	Date range filtering preference agreed but not yet implemented
-	•	Owner email not yet implemented
-	•	Error handling is still basic
-	•	Security model remains MVP-only
+	•	View PDF broken (signed URL fix pending)
+	•	Shared secret in frontend (not secure)
+	•	No authentication system yet
+	•	No owner email feature yet
+	•	No inline preview modal (new tab only planned)
+	•	Basic error handling
+	•	No pagination on prescription list
+	•	No search beyond Rx/date
 
-Immediate Recommended Next Steps
+⸻
 
-UI / Workflow
-	•	Rewrite practice.html again to include:
-	•	recent prescription list
-	•	inline “Void / Correct” action
-	•	safer and clearer success state
-	•	date range filtering rather than exact date only
+Next Steps
 
-Correction Workflow
-	•	Add frontend support for:
-	•	void reason
-	•	replacement PDF upload
-	•	call to /api/void-and-reissue
+Immediate:
+	1.	Fix View PDF using signed URLs
+	2.	Minor UI polish (spacing, clarity)
+	3.	Optional:
+	•	highlight active correction item
+	•	improve success messaging
 
-Security
-	•	Replace shared secret with proper authentication
-	•	Move toward practice-level auth and role separation
+Short-term:
+	4.	Add authentication (replace shared secret)
+	5.	Introduce practice accounts
 
-Future Product Extensions
-	•	Optional owner email field at upload
-	•	Owner email delivery of Rx code / prescription details
-	•	GDPR-compliant handling of owner personal data
-	•	Richer search / filtering within practice workspace
+Future:
+	6.	Optional owner email field
+	7.	Auto-send Rx to owner
+	8.	GDPR-compliant handling of personal data
+	9.	Advanced filtering/search
+	10.	Full audit trail UI
+
+⸻
 
 Summary
 
-The system is now a real hosted MVP with:
-	•	Practice-side issuing UI
-	•	Hosted Railway backend
-	•	Supabase database and storage
-	•	Working PDF processing
-	•	Working watermarking
-	•	Separate pharmacy-side preview / dispense UI
-	•	Working recent prescriptions endpoint
-	•	Working safe void-and-reissue backend flow with new Rx code for corrections
+The system is now a functioning hosted MVP with:
+	•	Practice workspace UI
+	•	Backend processing on Railway
+	•	Supabase DB + storage
+	•	Working issue + process flow
+	•	Working void-and-reissue workflow
+	•	Prescription log with filtering
+	•	Editable reference identifiers
+	•	Relationship tracking between prescriptions
 
-This is suitable for demonstration, but not yet production-grade from a security perspective.
+This is now a credible demonstrable product, but requires:
+	•	authentication
+	•	security hardening
+	•	storage access refinement
+
+before production use.
+
+⸻
 
 Resume Point
 
 When resuming, start with:
 
-“Rewrite practice.html with recent prescriptions log, date range filtering, and inline void/correct workflow.”
+“Fix View PDF using signed URLs, then move on to authentication.”
+
+⸻
+
+If you want next time, we can:
+👉 fix that PDF issue in ~2 minutes
+👉 then move straight into proper login/auth (this is the big next step)
