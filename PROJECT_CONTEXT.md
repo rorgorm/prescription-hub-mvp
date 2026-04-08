@@ -1,224 +1,172 @@
-# 📄 Veterinary Prescription Hub – Project Context
+# Veterinary Prescription Hub – Pharmacy UI JWT Migration State
 
 ## 🔄 Last Updated
-Date: 2026-04-07
+Date: 2026-04-08
 
 ---
 
-## 🚀 Current System State (Working)
+## ✅ Current Status (WORKING)
 
-### ✅ Authentication & Practice Model
-- Supabase Auth implemented
-- Login = **practice email + password**
-- One login per practice (no individual staff accounts)
-- JWT used for all backend API calls
-- Backend derives `practice_id` from token (`req.practiceId`)
-- No longer passing `practice_id` from frontend (correct design)
+### Authentication
+- Pharmacy login via Supabase Auth is implemented
+- UI gated behind login (loginCard → mainApp)
+- Logout button added and working
+- Session persists correctly across reloads
 
----
+### JWT Migration Progress
 
-### ✅ Practice Profile
-Each practice record contains:
-- `id` (matches Supabase auth user id)
-- `name`
-- `address`
-- `email`
-- `default_validity_days` (currently set to 180)
+#### Completed (JWT-based)
+- get_prescription_state
+- get_prescription_preview_attachment
+- full_dispense_prescription
+- get_prescription_dispense_attachment
 
----
-
-### ✅ Prescriber System (Current State)
-- Prescribers stored in `prescribers` table:
-  - `id`
-  - `practice_id`
-  - `vet_name`
-  - `rcvs_number`
-  - `is_active`
-
-- UI loads prescribers and populates dropdown at upload
-- Selected `prescriber_id` passed to backend
-- `issue_prescription` correctly validates:
-  - prescriber belongs to practice
-  - prescriber is active
+#### Still using API key (legacy)
+- start_partial_dispense_with_key
+- continue_partial_dispense_with_key
 
 ---
 
-### ⚠️ KNOWN ISSUE – PRESCRIBER DUPLICATION (CRITICAL TO FIX NEXT SESSION)
+## 🧠 Key Architectural Change
 
-Current situation:
-- Two parallel prescriber systems exist:
-  1. `prescribers` table (correct, used by backend)
-  2. `practice_prescribers` table (legacy UI layer)
+System is transitioning from:
 
-- This caused duplication:
-  - Required creating **two “Rory Gormley” entries**
-  - One in each table
+API key–based pharmacy authentication  
+→ JWT-based pharmacy authentication (Supabase Auth)
 
-- A **temporary bridge workaround** was implemented:
-  - UI loads from `practice_prescribers`
-  - Uses `prescriber_id` field to map to `prescribers.id`
-
-🚨 This is NOT acceptable long-term.
-
-### 🔧 REQUIRED NEXT STEP (HIGH PRIORITY)
-Remove duplication entirely and simplify:
-
-- Eliminate `practice_prescribers` layer
-- UI should load **directly from `prescribers`**
-- One prescriber = one row = one source of truth
-- No mapping / bridging / duplication
-
-👉 Goal:
-> Clean, single-table prescriber model with zero redundancy
+New rule:
+- auth.uid() MUST match pharmacies.id
+- pharmacies.is_active = true
 
 ---
 
-### ✅ Prescription Flow (Working End-to-End)
+## 🏗️ Database Requirements
 
-#### Issue Flow
-1. Upload file → Supabase Storage (`incoming/...`)
-2. Call `/api/issue-and-process`
-3. Backend:
-   - Calls `issue_prescription`
-   - Generates `rx_code`
-   - Processes file:
-     - clean PDF
-     - preview PDF (watermarked)
-4. Returns result to UI
+### pharmacies table
+Columns:
+- id (UUID) ← MUST match Supabase Auth user ID
+- name
+- is_active
+- created_at
 
-#### Replace Attachment Flow
-- Upload new file
-- Reprocess same Rx code
-- Regenerates preview + dispense PDFs
-- Updates audit fields
-
-#### Void Flow
-- Marks prescription as `VOIDED`
-- Stores `void_reason`
-- Prevents further use
+Important:
+Each pharmacy user must have:
+1. Supabase Auth account
+2. Matching row in public.pharmacies
 
 ---
 
-### ✅ UI Improvements (Latest Session)
+## 🧪 Current Working Flow
 
-#### Loading UX
-- Buttons now show:
-  - spinner
-  - immediate feedback
-  - disabled state
+### Pharmacy flow:
+1. Login (email/password)
+2. Enter Rx code
+3. Click Preview
+   - Calls get_prescription_state (JWT)
+   - Loads preview PDF (watermarked)
+4. Click "Dispense Full"
+   - Calls full_dispense_prescription (JWT)
+5. Unlocked PDF loads
+   - Calls get_prescription_dispense_attachment (JWT)
 
-#### Issue Button Flow
-- "Uploading..." during file upload
-- "Processing..." during backend work
-- Spinner stops immediately after success (no UI lock)
-
-#### Replace Attachment Flow
-- Same staged loading UX
-- Includes 60s timeout protection
-
-#### Timeout Protection
-- `AbortController` added to API calls
-- Prevents infinite spinner if backend hangs
+No API key required for:
+- Preview
+- Full dispense
+- Attachment access
 
 ---
 
-### ✅ Security Model
+## ❗ Known Transitional State
 
-#### Backend Middleware
-- `requirePracticeAuth` validates JWT
-- Sets:
-  - `req.practiceUser`
-  - `req.practiceId`
+UI still includes:
+- Pharmacy API key input field (now redundant)
 
-#### Removed
-- ❌ `practice_id` from frontend payloads
-
-#### Result
-- Fully secure practice-scoped API
+Backend still includes:
+- Partial dispense via _with_key functions
 
 ---
 
-### 🧠 Key Architectural Decisions
+## 🚧 Next Steps (HIGH PRIORITY)
 
-- Practice = single account (not per-user system)
-- Prescriber chosen at upload (not login-based)
-- Backend = source of truth for:
-  - identity
-  - permissions
-- Attachments:
-  - stored in Supabase Storage
-  - processed server-side (Node service)
+### 1. Migrate partial dispense to JWT
 
----
+Replace:
+- start_partial_dispense_with_key
+- continue_partial_dispense_with_key
 
-### ⚙️ Backend (Node / Railway)
+With:
+- start_partial_dispense
+- continue_partial_dispense
 
-Handles:
-- PDF generation (pdf-lib)
-- Image → PDF conversion (sharp)
-- Preview watermarking
-- Storage management
-- API endpoints:
-  - issue-and-process
-  - replace attachment
-  - void
-  - fetch prescriptions
+Using:
+- auth.uid()
 
 ---
 
-### 📌 Current Status
+### 2. Remove API key completely
 
-✅ Login working  
-✅ Logout working  
-✅ Prescriber selection working  
-✅ Issue flow working  
-✅ Replace flow working  
-✅ Void flow working  
-✅ Prescription list + filters working  
-✅ Reference saving working  
-✅ Loading UX improved  
+Once partial dispense is migrated:
 
----
+Remove:
+- API key input field
+- apiKeyInput
+- all references to apiKey
 
-## 🔜 NEXT SESSION PRIORITIES
-
-### 🔴 1. FIX PRESCRIBER ARCHITECTURE (TOP PRIORITY)
-- Remove `practice_prescribers`
-- Refactor UI to use `prescribers` directly
-- Remove all bridging logic
-- Ensure clean 1:1 data model
+Simplify:
+- getInputs() → return { rxCode }
 
 ---
 
-### 🟡 2. UX POLISH
-- Add spinner to login button
-- Optional: progress stages (Uploading → Processing → Done)
+### 3. UI cleanup
+- Remove API key box from pharmacy.html
+- Keep:
+  - login status display
+  - logout button
 
 ---
 
-### 🟡 3. OPTIONAL IMPROVEMENTS
-- Better error surfacing from backend
-- File upload progress (nice-to-have)
-- Cleaner success state UI
+### 4. Optional improvements
+- Add role-based guard (pharmacy vs practice)
+- Display pharmacy name in UI
+- Add session timeout handling
 
 ---
 
-## 💡 DESIGN PRINCIPLE (IMPORTANT REMINDER)
+## 🐛 Issues Encountered (Resolved)
 
-Avoid:
-> “Temporary fixes” or “bridging layers”
+ACTIVE_PHARMACY_NOT_FOUND
+- Cause: logged in as non-pharmacy user
+- Fix: auth.uid() must match pharmacies.id
 
-Aim for:
-> Clean, single-source-of-truth data model  
-> Minimal moving parts  
-> Low-friction for real-world practice use  
+Invalid API key
+- Cause: legacy _with_key function still called
+- Fix: migrated attachment + full dispense to JWT
+
+record has no field "email"
+- Cause: function referenced non-existent column
+- Fix: removed email reference
+
+---
+
+## 🧭 Current Position
+
+- Fully authenticated pharmacy UI
+- Core dispense flow working via JWT
+- Midway through removing API key system
 
 ---
 
-## 🧭 Resume Point
+## 🔜 Next Session Starting Point
 
-Next session should begin with:
+Resume from:
 
-> **Refactoring prescriber system to remove duplication and eliminate practice_prescribers entirely**
+"Migrate partial dispense to JWT and remove API key completely"
 
 ---
+
+## 🧩 Key Insight
+
+System is evolving into:
+
+A true identity-based dispensing ledger  
+rather than a token/key-based access system
